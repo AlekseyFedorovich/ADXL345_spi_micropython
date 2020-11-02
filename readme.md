@@ -1,6 +1,7 @@
 # uPy - ADXL345 - SPI
 Library for interacting through the SPI protocol with an 'Analog Devices ADXL345' accelerometer from an ESP32 MCU, flashed with MicroPython.
-Methods are optimised for continuos readings at max frequency.
+
+Methods are optimised for continuos readings at max frequency (3.2kHz).
 
 ## Wiring
 The following wirings refers to the tested setup on an ESP32-WROVER:
