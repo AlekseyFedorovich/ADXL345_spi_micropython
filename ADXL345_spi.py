@@ -20,24 +20,17 @@ class ADXL345:
     :param spi_freq: frequency of SPI comunications
     """
 
-    # setup serial interface
-    self.spi = SPI(
-      2, sck=Pin(scl_pin, Pin.OUT), mosi=Pin(sda_pin, Pin.OUT), miso=Pin(sdo_pin), baudrate=spi_freq, polarity=1, phase=1,
-      bits=8, firstbit=SPI.MSB
-    )
-    time.sleep(0.2)
-    self.cs = Pin(cs_pin, Pin.OUT, value=1)
-    time.sleep(0.2)
-
     # constants
     self.standard_g         = 9.80665  # m/s2
     self.read_mask          = const(0x80)
     self.multibyte_mask     = const(0x40)
     self.nmaxvalues_infifo  = 32
-    self.bytes_per_3axes     = 6  # 2 bytes * 3 axes
+    self.bytes_per_3axes    = 6  # 2 bytes * 3 axes
+    self.device_id          = 0xE5
 
     # register addresses
     self.addr_device        = const(0x53)
+    self.regaddr_devid      = const(0x00)
     self.regaddr_acc        = const(0x32)
     self.regaddr_freq       = const(0x2C)
     self.regaddr_pwr        = const(0x2D)
@@ -45,7 +38,14 @@ class ADXL345:
     self.regaddr_grange     = const(0x31)
     self.regaddr_fifoctl    = const(0x38)
     self.regaddr_fifostatus = const(0x39)
-    
+
+    # SPI pins
+    self.cs_pin = cs_pin
+    self.scl_pin = scl_pin
+    self.sdo_pin = sdo_pin
+    self.sda_pin = sda_pin
+    self.spi_freq = spi_freq
+
     # allowed values
     self.power_modes = {'standby': 0x00, 'measure': 0x08}
     self.g_ranges = {2: 0x00, 4: 0x01, 8: 0x10, 16: 0x11}
@@ -55,12 +55,30 @@ class ADXL345:
     }
 
   def __del__(self):
-    """
-    if spi is initalized on an already initialized spi it will not work
-    """
     self.spi.deinit()
 
   # == general purpose ==
+  def init_spi(self):
+    self.spi = SPI(
+      2, sck=Pin(self.scl_pin, Pin.OUT), mosi=Pin(self.sda_pin, Pin.OUT), miso=Pin(self.sdo_pin),
+      baudrate=self.spi_freq, polarity=1, phase=1, bits=8, firstbit=SPI.MSB
+    )
+    time.sleep(0.2)
+    self.cs = Pin(self.cs_pin, Pin.OUT, value=1)
+    time.sleep(0.2)
+    if not self.is_spi_communcation_working():
+      print(
+        'SPI communication is not working: '
+        '\n\t* wrong wiring?'
+        '\n\t* reinitialised SPI?'
+        '\n\t* broken sensor (test I2C to be sure)'
+      )
+    return self
+
+  def deinit_spi(self):
+    self.spi.deinit()
+    return self
+
   def write(self, regaddr:int, the_byte:int):
     """
     write byte into register address
@@ -128,6 +146,7 @@ class ADXL345:
     set the scale of output acceleration data
     :param grange: {2, 4, 8, 16}
     """
+    print('set range to pm %s' % (grange))
     self.write(self.regaddr_grange, self.g_ranges[grange])
     self.g_range = grange
     return self
@@ -136,6 +155,7 @@ class ADXL345:
     """
     :param sr: sampling rate of the accelerometer can be {1.56, 3.13, 6.25, 12.5, 25, 50, 100, 200, 400, 800, 1600, 3200}
     """
+    print('set sampling rate to %s' % (sr))
     self.write(self.regaddr_freq, self.device_sampling_rates[sr])
     self.sampling_rate = sr
     return self
@@ -145,16 +165,17 @@ class ADXL345:
     :param mode: in 'stream' mode the fifo is on, in 'bypass' mode the fifo is off
     :param watermark_level: see set_watermark_level method
     """
-    print("set fifo in " + mode + " mode")
     self.fifo_mode = mode
     self.watermark_level = watermark_level
     if mode == 'bypass':
       b = 0x00
+      print("set fifo in bypass mode")
     else:  # stream mode
       stream_bstr = '100'
       wm_bstr = bin(watermark_level).split('b')[1]
       bstr = '0b' + stream_bstr + '{:>5}'.format(wm_bstr).replace(' ', '0')
       b = int(bstr, 2)
+      print("set fifo in stream mode")
     self.write(self.regaddr_fifoctl, b)
     return self
 
@@ -173,6 +194,13 @@ class ADXL345:
     return self
 
   # == readings ==
+  def is_spi_communcation_working(self) -> bool:
+    if self.read(self.regaddr_devid, 1)[0] == self.device_id:
+      return True
+    else:
+      print(self.read(self.regaddr_devid, 1))
+      return False
+
   def clear_fifo(self):
     """
     Clears all values in fifo: usefull to start reading FIFO when expected, otherwise the first values were
@@ -181,8 +209,11 @@ class ADXL345:
     self.set_fifo_mode('bypass')
     self.set_fifo_mode('stream')
 
+  def clear_isdataready(self):
+    _ = self.read(self.regaddr_acc, 6)
+
   @micropython.native
-  def is_watermark_reached(self) -> int:
+  def is_watermark_reached(self) -> bool:
     """
     :return: 1 if watermark level of measures was reached since last reading, 0 otherwise
     """
@@ -204,13 +235,17 @@ class ADXL345:
 
   @micropython.native
   def read_many_xyz(self, n:int) -> tuple:
+    """
+    :param n: number of xyz accelerations to read from the accelerometer
+    :return: bytearray containing (n * bytes_per_3axes)
+    """
     # local variables and functions are MUCH faster
     regaddr_acc = self.regaddr_acc | self.read_mask | self.multibyte_mask
     spi_readinto = self.spi.readinto
     cs = self.cs
     ticks_us = time.ticks_us
     read = self.spi.read
-    regaddr_intsource = self.regaddr_intsource
+    regaddr_intsource = self.regaddr_intsource | self.read_mask
     bytes_per_3axes = self.bytes_per_3axes
     # definitions
     n_exp_bytes = (self.bytes_per_3axes + 1) * n
@@ -219,7 +254,9 @@ class ADXL345:
     m = memoryview(buf)
     # measure
     n_act_meas = 0
-    while n_act_meas < n:  # it is impossible to read all fifo values in a single transmission
+    self.clear_isdataready()
+    t_start = time.ticks_us()
+    while n_act_meas < n:
       cs.value(0)
       is_data_ready = read(2, regaddr_intsource)[1] >> 7 & 1
       cs.value(1)
@@ -230,8 +267,14 @@ class ADXL345:
       cs.value(1)
       T[n_act_meas] = ticks_us()
       n_act_meas += 1
+    t_stop = time.ticks_us()
+    # final corrections
     buf = self.remove_first_bytes_from_bytearray_of_many_transactions(buf)
     T = T[:n]
+    # debug
+    actual_acq_time = (t_stop - t_start) / 1000000
+    print('measured for %s seconds, expected %s seconds' % (actual_acq_time, n / self.sampling_rate))
+    print('actual sampling rate = ' + str(n_act_meas / actual_acq_time) + ' Hz')
     return buf, T
 
   @micropython.native
@@ -250,12 +293,19 @@ class ADXL345:
     m = memoryview(buf)
     # measure
     n_act_meas = 0
+    t_start = time.ticks_us()
     while n_act_meas < n:  # it is impossible to read all fifo values in a single transmission
       cs.value(0)
-      spi_readinto(m[n_act_meas * (self.bytes_per_3axes + 1): n_act_meas * (self.bytes_per_3axes + 1) + (self.bytes_per_3axes + 1)], regaddr_acc)
+      spi_readinto(m[n_act_meas*(self.bytes_per_3axes+1): n_act_meas*(self.bytes_per_3axes+1) + (self.bytes_per_3axes+1)], regaddr_acc)
       cs.value(1)
       n_act_meas += 1
+    t_stop = time.ticks_us()
+    # final corrections
     buf = self.remove_first_bytes_from_bytearray_of_many_transactions(buf)
+    # debug
+    actual_acq_time = (t_stop - t_start) / 1000000
+    print('measured for %s seconds, expected %s seconds' % (actual_acq_time, n/self.sampling_rate))
+    print('actual sampling rate = ' + str(n_act_meas / actual_acq_time) + ' Hz')
     return buf
 
   # == continuos readings able to reach 3.2 kHz ==
@@ -264,7 +314,7 @@ class ADXL345:
     """
     read for the provided amount of time from the acceleration register, saving the value only if a new measure is
     available since last reading
-    :param acquisition_time:
+    :param acquisition_time: seconds the acquisition should last
     :return: (
         bytearray containing 2 bytes for each of the 3 axes multiplied by the fractions of the sampling rate contained in the acquisition time,
         array of times at which each sample was recorded in microseconds
@@ -286,8 +336,6 @@ class ADXL345:
     buf = bytearray(int(n_exp_bytes * 1.5))
     m = memoryview(buf)
     # set up device
-    self.set_g_range(self.g_range)
-    self.set_sampling_rate(self.sampling_rate)
     self.set_fifo_mode('bypass')
     gc.collect()
     # measure
@@ -342,8 +390,6 @@ class ADXL345:
     buf = bytearray(int(n_exp_bytes * 1.5))
     m = memoryview(buf)
     # set up device
-    self.set_g_range(self.g_range)
-    self.set_sampling_rate(self.sampling_rate)
     self.set_fifo_mode('stream')
     gc.collect()
     # measure
@@ -374,6 +420,12 @@ class ADXL345:
 
   # == conversions ==
   def xyzbytes2g(self, buf:bytearray) -> tuple:
+    """
+    convert a bytearray of measures on the three axes xyz in three lists where the acceleration is in units of
+        gravity on the sealevel (g)
+    :param buf: bytearray of 2 bytes * 3 axes * nvalues
+    :return: 3 lists of ints corresponding to x, y, z values of acceleration in units of g
+    """
     gc.collect()
     n_act_meas = int(len(buf)/self.bytes_per_3axes)
     acc_x, acc_y, acc_z = zip(*[ustruct.unpack('<HHH', buf[i:i + self.bytes_per_3axes]) for i in range(n_act_meas) if i % self.bytes_per_3axes == 0])
