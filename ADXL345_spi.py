@@ -7,7 +7,7 @@ from machine import SPI, Pin
 
 # TODO: const also on non bytes?
 
-class ADXL345:
+class Accelerometer:
   
   def __init__(self, cs_pin=5, scl_pin=18, sda_pin=23, sdo_pin=19, spi_freq=5000000):
     """
@@ -19,6 +19,11 @@ class ADXL345:
     :param sdo_pin: MCU pin number at which accelerometer's SDO wire is connected (MISO)
     :param spi_freq: frequency of SPI comunications
     """
+
+    # valid inputs
+    if spi_freq > 5000000:
+      spi_freq = 5000000
+      print('max spi clock frequency for adxl355 is 5Mhz')
 
     # constants
     self.standard_g         = 9.80665  # m/s2
@@ -233,94 +238,17 @@ class ADXL345:
     """
     return self.read(self.regaddr_fifostatus, 1)[0] & 0x3f  # first six bits to int
 
+  # == continuos readings able to reach 3.2 kHz ==
   @micropython.native
   def read_many_xyz(self, n:int) -> tuple:
     """
     :param n: number of xyz accelerations to read from the accelerometer
-    :return: bytearray containing (n * bytes_per_3axes)
-    """
-    # local variables and functions are MUCH faster
-    regaddr_acc = self.regaddr_acc | self.read_mask | self.multibyte_mask
-    spi_readinto = self.spi.readinto
-    cs = self.cs
-    ticks_us = time.ticks_us
-    read = self.spi.read
-    regaddr_intsource = self.regaddr_intsource | self.read_mask
-    bytes_per_3axes = self.bytes_per_3axes
-    # definitions
-    n_exp_bytes = (self.bytes_per_3axes + 1) * n
-    T = [0] * (int(n * 1.5))
-    buf = bytearray(n_exp_bytes)
-    m = memoryview(buf)
-    # measure
-    n_act_meas = 0
-    self.clear_isdataready()
-    t_start = time.ticks_us()
-    while n_act_meas < n:
-      cs.value(0)
-      is_data_ready = read(2, regaddr_intsource)[1] >> 7 & 1
-      cs.value(1)
-      if not is_data_ready:
-        continue
-      cs.value(0)
-      spi_readinto(m[n_act_meas * (bytes_per_3axes + 1):n_act_meas * (bytes_per_3axes + 1) + (bytes_per_3axes + 1)], regaddr_acc)
-      cs.value(1)
-      T[n_act_meas] = ticks_us()
-      n_act_meas += 1
-    t_stop = time.ticks_us()
-    # final corrections
-    buf = self.remove_first_bytes_from_bytearray_of_many_transactions(buf)
-    T = T[:n]
-    # debug
-    actual_acq_time = (t_stop - t_start) / 1000000
-    print('measured for %s seconds, expected %s seconds' % (actual_acq_time, n / self.sampling_rate))
-    print('actual sampling rate = ' + str(n_act_meas / actual_acq_time) + ' Hz')
-    return buf, T
-
-  @micropython.native
-  def read_many_xyz_fromfifo(self, n: int) -> bytearray:
-    """
-    read many measures of accaleration on the 3 axes from the fifo register
-    :param n: number of measures to read (xyz counts 1)
-    :return: bytearray containing 2 bytes for each of the 3 axes, for nrows (6 * nrows bytes)
-    """
-    # local variables and functions are MUCH faster
-    regaddr_acc = self.regaddr_acc | self.read_mask | self.multibyte_mask
-    spi_readinto = self.spi.readinto
-    cs = self.cs
-    # definitions
-    buf = bytearray((self.bytes_per_3axes+1) * n)
-    m = memoryview(buf)
-    # measure
-    n_act_meas = 0
-    t_start = time.ticks_us()
-    while n_act_meas < n:  # it is impossible to read all fifo values in a single transmission
-      cs.value(0)
-      spi_readinto(m[n_act_meas*(self.bytes_per_3axes+1): n_act_meas*(self.bytes_per_3axes+1) + (self.bytes_per_3axes+1)], regaddr_acc)
-      cs.value(1)
-      n_act_meas += 1
-    t_stop = time.ticks_us()
-    # final corrections
-    buf = self.remove_first_bytes_from_bytearray_of_many_transactions(buf)
-    # debug
-    actual_acq_time = (t_stop - t_start) / 1000000
-    print('measured for %s seconds, expected %s seconds' % (actual_acq_time, n/self.sampling_rate))
-    print('actual sampling rate = ' + str(n_act_meas / actual_acq_time) + ' Hz')
-    return buf
-
-  # == continuos readings able to reach 3.2 kHz ==
-  @micropython.native
-  def read_continuos_xyz(self, acquisition_time:int) -> tuple:
-    """
-    read for the provided amount of time from the acceleration register, saving the value only if a new measure is
-    available since last reading
-    :param acquisition_time: seconds the acquisition should last
-    :return: (
+    return: (
         bytearray containing 2 bytes for each of the 3 axes multiplied by the fractions of the sampling rate contained in the acquisition time,
         array of times at which each sample was recorded in microseconds
     )
     """
-    print("Measuring for %s seconds at %s Hz, range %sg" % (acquisition_time, self.sampling_rate, self.g_range))
+    print("Measuring %s samples at %s Hz, range %sg" % (n, self.sampling_rate, self.g_range))
     # local variables and functions are MUCH faster
     regaddr_acc = self.regaddr_acc | self.read_mask | self.multibyte_mask
     regaddr_intsource = self.regaddr_intsource | self.read_mask
@@ -330,7 +258,7 @@ class ADXL345:
     bytes_per_3axes = self.bytes_per_3axes
     read = self.spi.read
     # definitions
-    n_exp_meas = int(acquisition_time * self.sampling_rate)
+    n_exp_meas = n
     n_exp_bytes = (self.bytes_per_3axes + 1) * n_exp_meas
     T = [0] * (int(n_exp_meas * 1.5))
     buf = bytearray(int(n_exp_bytes * 1.5))
@@ -350,34 +278,34 @@ class ADXL345:
       if not is_data_ready:
         continue
       cs.value(0)
-      spi_readinto(m[start_index : stop_index], regaddr_acc)
+      spi_readinto(m[start_index: stop_index], regaddr_acc)
       cs.value(1)
       T[n_act_meas] = ticks_us()
       n_act_meas += 1
     self.set_power_mode('standby')
     # final corrections
     buf = self.remove_first_bytes_from_bytearray_of_many_transactions(buf)
-    buf = buf[:n_exp_meas*bytes_per_3axes]  # remove exceeding values
-    T = T[:n_act_meas]  # remove exceeding values
+    buf = buf[:n_exp_meas * bytes_per_3axes]  # remove exceeding values
+    T = T[:n_exp_meas]  # remove exceeding values
     # debug
     actual_acq_time = (T[-1] - T[0]) / 1000000
-    print('measured for %s seconds, expected %s seconds' % (actual_acq_time, acquisition_time))
+    print('measured for %s seconds, expected %s seconds' % (actual_acq_time, n_exp_meas/self.sampling_rate))
     print('avg sampling rate = ' + str(n_act_meas / actual_acq_time) + ' Hz')
     # TODO: send error to webapp when actual acquisition time is different from expected
     gc.collect()
     return buf, T
 
   @micropython.native
-  def read_continuos_xyz_fromfifo(self, acquisition_time: int) -> tuple:
+  def read_many_xyz_fromfifo(self, n: int) -> tuple:
     """
-    read for the provided amount of time all the values contained in the fifo register (if any)
-    :param acquisition_time:
-    :return: (
+    read many measures of accaleration on the 3 axes from the fifo register
+    :param n: number of measures to read (xyz counts 1)
+    return: (
         bytearray containing 2 bytes for each of the 3 axes multiplied by the fractions of the sampling rate contained in the acquisition time,
         array of times at which each sample was recorded in microseconds
     )
     """
-    print("Measuring for %s seconds at %s Hz, range %sg" % (acquisition_time, self.sampling_rate, self.g_range))
+    print("Measuring %s samples at %s Hz, range %sg" % (n, self.sampling_rate, self.g_range))
     # local variables and functions are MUCH faster
     regaddr_acc = self.regaddr_acc | self.read_mask | self.multibyte_mask
     spi_readinto = self.spi.readinto
@@ -385,7 +313,7 @@ class ADXL345:
     get_nvalues_in_fifo = self.get_nvalues_in_fifo
     bytes_per_3axes = self.bytes_per_3axes
     # definitions
-    n_exp_meas = int(acquisition_time * self.sampling_rate)
+    n_exp_meas = n
     n_exp_bytes = (bytes_per_3axes + 1) * n_exp_meas
     buf = bytearray(int(n_exp_bytes * 1.5))
     m = memoryview(buf)
@@ -399,23 +327,53 @@ class ADXL345:
     t_start = time.ticks_us()
     while n_act_meas < n_exp_meas:
       nvalues_infifo = get_nvalues_in_fifo()
-      for _ in range(nvalues_infifo):
+      for _ in range(nvalues_infifo):  # it is impossible to read a block of measures from fifo
         cs.value(0)
-        spi_readinto(m[n_act_meas*(bytes_per_3axes+1) : n_act_meas*(bytes_per_3axes+1) + (bytes_per_3axes+1)], regaddr_acc)
+        spi_readinto(m[n_act_meas * (bytes_per_3axes + 1): n_act_meas * (bytes_per_3axes + 1) + (bytes_per_3axes + 1)], regaddr_acc)
         cs.value(1)
         n_act_meas += 1
     t_stop = time.ticks_us()
     self.set_power_mode('standby')
     # final corrections
     buf = self.remove_first_bytes_from_bytearray_of_many_transactions(buf)
-    buf = buf[:n_exp_meas*bytes_per_3axes]                                  # remove exceeding values
-    T = [i / self.sampling_rate for i in range(n_exp_meas)]                 # remove exceeding values
-    # debug
+    buf = buf[:n_exp_meas * bytes_per_3axes]  # remove exceeding values
     actual_acq_time = (t_stop - t_start) / 1000000
-    print('measured for %s seconds, expected %s seconds' % (actual_acq_time, acquisition_time))
-    print('actual sampling rate = ' + str(n_act_meas/actual_acq_time) + ' Hz')
+    actual_sampling_rate = n_act_meas / actual_acq_time
+    T = [(i+1) / actual_sampling_rate for i in range(n_exp_meas)]
+    # debug
+    print('measured for %s seconds, expected %s seconds' % (actual_acq_time, n/self.sampling_rate))
+    print('actual sampling rate = ' + str(n_act_meas / actual_acq_time) + ' Hz')
     # TODO: send error to webapp when actual acquisition time is different from expected
     gc.collect()
+    return buf, T
+
+  @micropython.native
+  def read_continuos_xyz(self, acquisition_time:int) -> tuple:
+    """
+    read for the provided amount of time from the acceleration register, saving the value only if a new measure is
+    available since last reading
+    :param acquisition_time: seconds the acquisition should last
+    :return: (
+        bytearray containing 2 bytes for each of the 3 axes multiplied by the fractions of the sampling rate contained in the acquisition time,
+        array of times at which each sample was recorded in microseconds
+    )
+    """
+    n_exp_meas = int(acquisition_time * self.sampling_rate)
+    buf, T = self.read_many_xyz(n_exp_meas)
+    return buf, T
+
+  @micropython.native
+  def read_continuos_xyz_fromfifo(self, acquisition_time: int) -> tuple:
+    """
+    read for the provided amount of time all the values contained in the fifo register (if any)
+    :param acquisition_time:
+    :return: (
+        bytearray containing 2 bytes for each of the 3 axes multiplied by the fractions of the sampling rate contained in the acquisition time,
+        array of times at which each sample was recorded in microseconds
+    )
+    """
+    n_exp_meas = int(acquisition_time * self.sampling_rate)
+    buf, T = self.read_many_xyz_fromfifo(n_exp_meas)
     return buf, T
 
   # == conversions ==
