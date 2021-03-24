@@ -30,7 +30,7 @@ accelerometer.set_fifo_mode('bypass')
 accelerometer.set_power_mode('measure')
 buf, T = accelerometer.read_many_xyz(n=1)
 accelerometer.set_power_mode('standby')
-x, y, z = accelerometer.xyzbytes2g(buf)  # g units
+x, y, z = accelerometer.xyzbytes2g(buf)  # convert bytearray in 3 acceleration arrays (x, y, z) in g units
 accelerometer.deinit_spi()  # this is necessary, otherwise if another SPI is initialized it won't work
 ```
 
