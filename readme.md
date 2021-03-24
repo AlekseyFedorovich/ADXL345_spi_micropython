@@ -16,7 +16,7 @@ SDO/ALT ADDRESS   | vspi miso (D19)
 SDA/SDI/SDO       | vspi mosi (D23)
 
 ## RAM and MemoryErrors
-Consider that at high sampling rates the MCU collects 3_axes x sampling_rate samples per second. This may result in ending the available RAM of MCUs very quickly: set your acquisition time accordingly and clear data arrays when you are done with them. 
+Consider that at high sampling rates the MCU collects 3_axes x sampling_rate floats per second. This may result in ending the available RAM of MCUs very quickly: set your acquisition time accordingly and clear data arrays when you are done with them. 
 
 ## Examples
 ``` python
