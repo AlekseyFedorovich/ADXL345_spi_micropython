@@ -19,8 +19,8 @@ SDA/SDI/SDO       | vspi mosi (D23)
 Consider that at high sampling rates the MCU collects 3_axes x sampling_rate floats per second. This may result in ending the available RAM of MCUs very quickly: set your acquisition time accordingly and clear data arrays when you are done with them. 
 
 ## Examples
+### read one x, y, z
 ``` python
-""" read one x, y, z """
 from ADXL345_spi import ADXL345 as Accelerometer
 accelerometer = Accelerometer(cs_pin=5, scl_pin=18, sda_pin=23, sdo_pin=19, spi_freq=5000000)
 accelerometer.init_spi()
@@ -34,8 +34,8 @@ x, y, z = accelerometer.xyzbytes2g(buf)  # g units
 accelerometer.deinit_spi()  # this is necessary, otherwise if another SPI is initialized it won't work
 ```
 
+### read many x, y, z
 ``` python
-""" read many x, y, z """
 from ADXL345_spi import ADXL345 as Accelerometer
 accelerometer = Accelerometer()                     # assumes accelerometer is connected to ESP32 vspi default Pins
 accelerometer.init_spi()
@@ -49,8 +49,8 @@ x, y, z = accelerometer.xyzbytes2g(buf)
 accelerometer.deinit_spi()
 ```
 
+### read continuosly when data is ready
 ``` python
-""" read continuosly when data is ready """
 from ADXL345_spi import ADXL345 as Accelerometer
 accelerometer = Accelerometer()
 accelerometer.init_spi()
@@ -64,8 +64,8 @@ x, y, z = accelerometer.xyzbytes2g(buf)
 accelerometer.deinit_spi()
 ```
 
+### read continuosly from fifo
 ``` python
-""" read continuosly from fifo """
 from ADXL345_spi import ADXL345 as Accelerometer
 accelerometer = Accelerometer()
 accelerometer.init_spi()
