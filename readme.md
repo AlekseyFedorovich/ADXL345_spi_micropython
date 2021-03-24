@@ -37,7 +37,7 @@ accelerometer.deinit_spi()  # this is necessary, otherwise if another SPI is ini
 ### read many x, y, z
 ``` python
 from ADXL345_spi import ADXL345 as Accelerometer
-accelerometer = Accelerometer()                     # assumes accelerometer is connected to ESP32 vspi default Pins
+accelerometer = Accelerometer()                     # assumes accelerometer is connected to MCU spi default Pins
 accelerometer.init_spi()
 accelerometer.set_sampling_rate(3200)
 accelerometer.set_g_range(2)
