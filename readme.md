@@ -1,10 +1,10 @@
 # uPy - ADXL345 - SPI
 Library for interacting through the SPI protocol with an 'Analog Devices ADXL345' accelerometer from an ESP32 MCU, flashed with MicroPython.
 
-Methods are optimised for continuos readings at max frequency (3.2kHz).
+Methods are optimised for being as fast as possible, trying to reach max available sampling frequency (3.2kHz) for this device.
 
 ## Wiring
-The following wirings refers to the tested setup on an ESP32-WROVER:
+The following wirings refers to the tested setup on an **ESP32-WROVER** (4MB RAM):
 
 ADXL345 Pin name  | ESP32 Pin name (number)
  ---------------- | -----------------------
@@ -14,6 +14,9 @@ CS                | vspi cs (D5)
 SCL/SCLK          | vspi scl (D18)
 SDO/ALT ADDRESS   | vspi miso (D19)
 SDA/SDI/SDO       | vspi mosi (D23)
+
+## RAM and MemoryErrors
+Consider that at high sampling rates the MCU collects 3_axes x sampling_rate samples per second. This may result in ending the available RAM of MCUs very quickly: set your acquisition time accordingly and clear data arrays when you are done with them. 
 
 ## Examples
 ``` python
