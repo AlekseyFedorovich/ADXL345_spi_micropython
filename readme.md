@@ -43,9 +43,9 @@ accelerometer.set_sampling_rate(3200)
 accelerometer.set_g_range(2)
 accelerometer.set_fifo_mode('bypass')
 accelerometer.set_power_mode('measure')
-buf, T = accelerometer.read_many_xyz(n=10)
+buf, T = accelerometer.read_many_xyz(n=10)  # reads ten samples for each axis at the requested sampling rate
 accelerometer.set_power_mode('standby')
-x, y, z = accelerometer.xyzbytes2g(buf)
+x, y, z = accelerometer.xyzbytes2g(buf)     # arrays of length 10, to be associated with the T array that holds the times of the measure of each sample
 accelerometer.deinit_spi()
 ```
 
@@ -58,13 +58,14 @@ accelerometer.set_sampling_rate(3200)
 accelerometer.set_g_range(2)
 accelerometer.set_fifo_mode('bypass')
 accelerometer.set_power_mode('measure')
-buf, T = accelerometer.read_continuos_xyz(acquisition_time=1.5)
+buf, T = accelerometer.read_continuos_xyz(acquisition_time=1.5)  # reads samples for 1.5 seconds from each axis at the requested sampling rate
 accelerometer.set_power_mode('standby')
-x, y, z = accelerometer.xyzbytes2g(buf)
+x, y, z = accelerometer.xyzbytes2g(buf)  # arrays (in principle) of length acquisition_time * sampling_rate 
 accelerometer.deinit_spi()
 ```
 
 ### read continuosly from fifo
+The method for reading from fifo is implemented even though with this device I wasn't able to read more than one row of the fifo in one transaction (resulting in reading following registers instead of other rows of the fifo)
 ``` python
 from ADXL345_spi import ADXL345 as Accelerometer
 accelerometer = Accelerometer()
