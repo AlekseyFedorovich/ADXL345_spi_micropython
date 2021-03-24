@@ -25,7 +25,7 @@ from ADXL345_spi import ADXL345 as Accelerometer
 accelerometer = Accelerometer(cs_pin=5, scl_pin=18, sda_pin=23, sdo_pin=19, spi_freq=5000000)
 accelerometer.init_spi()
 accelerometer.set_sampling_rate(1.56)   # Hz
-accelerometer.set_g_range(2)            # pm 2g
+accelerometer.set_g_range(2)            # max measurable acceleration pm 2g
 accelerometer.set_fifo_mode('bypass')
 accelerometer.set_power_mode('measure')
 buf, T = accelerometer.read_many_xyz(n=1)
