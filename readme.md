@@ -1,7 +1,7 @@
 # uPy - ADXL345 - SPI
 Library for controlling through the SPI protocol an 'Analog Devices ADXL345' accelerometer from an MCU flashed with MicroPython (in particular this was tested with a **ESP32-WROVER** (4MB RAM)).
 
-Methods are optimised for being as fast as possible, trying to reach max available sampling frequency (3.2kHz) for this device.
+Methods are optimised for being as fast as possible, trying to reach max available sampling rate (3.2kHz) for this device.
 
 ## Wiring
 The following wirings refers to the tested setup on an ESP32-WROVER:
