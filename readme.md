@@ -65,7 +65,7 @@ accelerometer.deinit_spi()
 ```
 
 ### read continuosly from fifo
-The method for reading from fifo is implemented even though with this device I wasn't able to read more than one row of the fifo in one transaction (resulting in reading following registers instead of other rows of the fifo)
+The method for reading from fifo is implemented even though it doesn't read more than one row of the fifo in one transaction, making its performances equal to the method reading measures when they are ready. Trying to read more than one row of the fifo in one transaction always resulted in reading following registers instead of other rows of the fifo.
 ``` python
 from ADXL345_spi import ADXL345 as Accelerometer
 accelerometer = Accelerometer()
