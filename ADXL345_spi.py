@@ -1,6 +1,5 @@
 from micropython import const
 import time
-from math import floor, ceil
 import ustruct
 import gc
 from machine import SPI, Pin
@@ -385,8 +384,7 @@ class Accelerometer:
     :return: 3 lists of ints corresponding to x, y, z values of acceleration in units of g
     """
     gc.collect()
-    n_act_meas = int(len(buf)/self.bytes_per_3axes)
-    acc_x, acc_y, acc_z = zip(*[ustruct.unpack('<HHH', buf[i:i + self.bytes_per_3axes]) for i in range(n_act_meas) if i % self.bytes_per_3axes == 0])
+    acc_x, acc_y, acc_z = zip(*[ustruct.unpack('<HHH', buf[i:i + self.bytes_per_3axes]) for i in range(0,len(buf),self.bytes_per_3axes)]) # use range(start,stop,step)
     # negative values rule
     acc_x = [x if x <= 32767 else x - 65536 for x in acc_x]
     acc_y = [y if y <= 32767 else y - 65536 for y in acc_y]
