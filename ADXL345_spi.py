@@ -1,18 +1,15 @@
 from micropython import const
 import time
-from math import floor, ceil
 import ustruct
 import gc
 from machine import SPI, Pin
 
-# TODO: const also on non bytes?
-
-class Accelerometer:
-  
-  def __init__(self, cs_pin=5, scl_pin=18, sda_pin=23, sdo_pin=19, spi_freq=5000000):
+# commented out micropython.native decorator as it is not supported in some ports
+class ADXL345:
+  def __init__(self, spi_bus=1, cs_pin=5, scl_pin=18, sda_pin=23, sdo_pin=19, spi_freq=5000000, debug=False):
     """
-    Class for fast SPI comunications between an ESP32 flashed with MicroPython and an Analog Devices ADXL345
-      accelerometer
+    Class for fast SPI comunications between a MCU flashed with MicroPython and an Analog Devices ADXL345 accelerometer
+    :param spi_bus: SPI bus number at which accelerometer is connected
     :param cs_pin: MCU pin number at which accelerometer's CS wire is connected
     :param scl_pin: MCU pin number at which accelerometer's SCL wire is connected (SCK)
     :param sda_pin: MCU pin number at which accelerometer's SDA wire is connected (MOSI)
@@ -20,18 +17,19 @@ class Accelerometer:
     :param spi_freq: frequency of SPI comunications
     """
 
-    # valid inputs
+    # Sanity check
     if spi_freq > 5000000:
       spi_freq = 5000000
-      print('max spi clock frequency for adxl355 is 5Mhz')
-
-    # constants
-    self.standard_g         = 9.80665  # m/s2
+      print('max spi clock frequency for adxl345 is 5Mhz')
+    
+    # Constants
+    
+    self.standard_g         = const(9.80665)  # m/s2
     self.read_mask          = const(0x80)
     self.multibyte_mask     = const(0x40)
-    self.nmaxvalues_infifo  = 32
-    self.bytes_per_3axes    = 6  # 2 bytes * 3 axes
-    self.device_id          = 0xE5
+    self.nmaxvalues_infifo  = const(32)
+    self.bytes_per_3axes    = const(6)  # 2 bytes * 3 axes
+    self.device_id          = const(0xE5)
 
     # register addresses
     self.addr_device        = const(0x53)
@@ -39,50 +37,44 @@ class Accelerometer:
     self.regaddr_acc        = const(0x32)
     self.regaddr_freq       = const(0x2C)
     self.regaddr_pwr        = const(0x2D)
+    self.regaddr_int_enable = const(0x2E)
+    self.regaddr_int_map    = const(0x2F)
     self.regaddr_intsource  = const(0x30)
     self.regaddr_grange     = const(0x31)
     self.regaddr_fifoctl    = const(0x38)
     self.regaddr_fifostatus = const(0x39)
-
+    
+    # allowed values
+    self.power_modes = {'standby': 0x00, 'measure': 0x08}
+    self.g_ranges = {2: 0x00, 4: 0x01, 8: 0x10, 16: 0x11}
+    self.device_sampling_rates = {1.56: 0x04, 3.13: 0x05, 6.25: 0x06, 12.5: 0x07, 25: 0x08, 50: 0x09, 100: 0x0a, 200: 0x0b, 400: 0x0c, 800: 0x0d, 1600: 0x0e, 3200: 0x0f}
+    
     # SPI pins
+    self.spi_bus = spi_bus
     self.cs_pin = cs_pin
     self.scl_pin = scl_pin
     self.sdo_pin = sdo_pin
     self.sda_pin = sda_pin
     self.spi_freq = spi_freq
-
-    # allowed values
-    self.power_modes = {'standby': 0x00, 'measure': 0x08}
-    self.g_ranges = {2: 0x00, 4: 0x01, 8: 0x10, 16: 0x11}
-    self.device_sampling_rates = {
-      1.56: 0x04, 3.13: 0x05, 6.25: 0x06, 12.5: 0x07, 25: 0x08, 50: 0x09, 100: 0x0a, 200: 0x0b, 400: 0x0c, 800: 0x0d,
-      1600: 0x0e, 3200: 0x0f
-    }
-
-  def __del__(self):
-    self.spi.deinit()
-
-  # == general purpose ==
+    
+    # Debugging
+    self.debug = debug
+  
+  # == General Purpose ==
   def init_spi(self):
-    self.spi = SPI(
-      2, sck=Pin(self.scl_pin, Pin.OUT), mosi=Pin(self.sda_pin, Pin.OUT), miso=Pin(self.sdo_pin),
-      baudrate=self.spi_freq, polarity=1, phase=1, bits=8, firstbit=SPI.MSB
-    )
+    self.spi = SPI(self.spi_bus, sck=Pin(self.scl_pin, Pin.OUT), mosi=Pin(self.sda_pin, Pin.OUT), miso=Pin(self.sdo_pin), baudrate=self.spi_freq, polarity=1, phase=1, bits=8, firstbit=SPI.MSB)
     time.sleep(0.2)
     self.cs = Pin(self.cs_pin, Pin.OUT, value=1)
     time.sleep(0.2)
-    if not self.is_spi_communcation_working():
-      print(
-        'SPI communication is not working: '
-        '\n\t* wrong wiring?'
-        '\n\t* reinitialised SPI?'
-        '\n\t* broken sensor (test I2C to be sure)'
-      )
+    self.check_spi()    
     return self
 
   def deinit_spi(self):
     self.spi.deinit()
     return self
+  
+  def __del__(self): # might not be called due to limitations of MicroPython. See https://docs.micropython.org/en/latest/genrst/core_language.html#special-method-del-not-implemented-for-user-defined-classes
+    self.deinit_spi()
 
   def write(self, regaddr:int, the_byte:int):
     """
@@ -95,8 +87,8 @@ class Accelerometer:
     self.cs.value(1)
     return self
 
-  @micropython.native
-  def read(self, regaddr: int, nbytes: int) -> bytearray or int:
+  #@micropython.native
+  def read(self, regaddr: int, nbytes: int) -> bytearray or int: # type: ignore
     """
     read bytes from register
     :param regaddr: register address to read
@@ -111,7 +103,7 @@ class Accelerometer:
     self.cs.value(1)
     return value
 
-  @micropython.native
+  #@micropython.native
   def read_into(self, buf: bytearray, regaddr: int) -> bytearray:
     """
     read bytes from register into an existing bytearray, generally faster than normal read
@@ -125,7 +117,7 @@ class Accelerometer:
     self.cs.value(1)
     return buf
 
-  @micropython.native
+  #@micropython.native
   def remove_first_bytes_from_bytearray_of_many_transactions(self, buf:bytearray) -> bytearray:
     """
     remove first byte of SPI transaction (which is irrelevant) from a buffer read through spi.readinto
@@ -135,7 +127,7 @@ class Accelerometer:
     bytes_per_3axes = self.bytes_per_3axes
     return bytearray([b for i, b in enumerate(buf) if i % (bytes_per_3axes + 1) != 0])
 
-  # == settings ==
+  # == Settings ==
   def set_power_mode(self, mode:str):
     """
     set the power mode of the accelerometer
@@ -197,13 +189,73 @@ class Accelerometer:
     b = int(bstr, 2)
     self.write(self.regaddr_fifoctl, b)
     return self
+  
+  def enable_interrupts(self, data_ready:bool=False, single_tap:bool=False, double_tap:bool=False, activity:bool=False, inactivity:bool=False, free_fall:bool=False, watermark:bool=False, overrun:bool=False):
+    """
+    Enable interrupts on the accelerometer. All enabled interrupts are ORed together before outputing to corresponding INT pin set by set_int_map method.
+    
+    :param data_ready: interrupt when a new measure is available
+    :param single_tap: interrupt when a single tap is detected
+    :param double_tap: interrupt when a double tap is detected
+    :param activity: interrupt when the activity detection is triggered
+    :param inactivity: interrupt when the inactivity detection is triggered
+    :param free_fall: interrupt when a free fall is detected
+    :param watermark: interrupt when the watermark level is reached
+    :param overrun: interrupt when the fifo overrun is detected
+    """
+    mode = (
+      (data_ready << 7) |
+      (single_tap << 6) |
+      (double_tap << 5) |
+      (activity << 4) |
+      (inactivity << 3) |
+      (free_fall << 2) |
+      (watermark << 1) |
+      overrun
+    )
+    self.write(self.regaddr_int_enable, mode)
+    return self
 
-  # == readings ==
-  def is_spi_communcation_working(self) -> bool:
-    if self.read(self.regaddr_devid, 1)[0] == self.device_id:
+  def set_int_map(self, data_ready:bool=False, single_tap:bool=False, double_tap:bool=False, activity:bool=False, inactivity:bool=False, free_fall:bool=False, watermark:bool=False, overrun:bool=False):
+    """
+    Set the bit to False to output interrupt on INT1 pin, True to output interrupt on INT2 pin.
+    
+    :param data_ready: True to output data_ready interrupt on INT1 pin, False to output on INT2 pin
+    :param single_tap: True to output single_tap interrupt on INT1 pin, False to output on INT2 pin
+    :param double_tap: True to output double_tap interrupt on INT1 pin, False to output on INT2 pin
+    :param activity: True to output activity interrupt on INT1 pin, False to output on INT2 pin
+    :param inactivity: True to output inactivity interrupt on INT1 pin, False to output on INT2 pin
+    :param free_fall: True to output free_fall interrupt on INT1 pin, False to output on INT2 pin
+    :param watermark: True to output watermark interrupt on INT1 pin, False to output on INT2 pin
+    :param overrun: True to output overrun interrupt on INT1 pin, False to output on INT2 pin
+    """
+    mapping = (
+      (data_ready << 7) |
+      (single_tap << 6) |
+      (double_tap << 5) |
+      (activity << 4) |
+      (inactivity << 3) |
+      (free_fall << 2) |
+      (watermark << 1) |
+      overrun
+    )
+    self.write(self.regaddr_int_map, mapping)
+    return self
+    
+  # == Readings ==
+  def check_spi(self) -> bool:    
+    read = self.read(self.regaddr_devid, 1)[0]
+    if read == self.device_id:
       return True
     else:
-      print(self.read(self.regaddr_devid, 1))
+      if self.debug:
+        print(
+          'SPI communication between MCU and ADXL345 is not working.\n'
+          'Please check the following:\n'
+          '\t* wrong wiring?\n'
+          '\t* reinitialised SPI?\n'
+          '\t* broken sensor (test I2C to be sure)'
+        )
       return False
 
   def clear_fifo(self):
@@ -217,30 +269,43 @@ class Accelerometer:
   def clear_isdataready(self):
     _ = self.read(self.regaddr_acc, 6)
 
-  @micropython.native
-  def is_watermark_reached(self) -> bool:
+  #@micropython.native
+  def get_interrupts(self) -> dict[bool]:
     """
-    :return: 1 if watermark level of measures was reached since last reading, 0 otherwise
+    Get the status of each interrupt from SPI.
+    
+    :return: dict with the status of each interrupt.
+    :return['data_ready']: True if a new measure is available
+    :return['single_tap']: True if a single tap is detected
+    :return['double_tap']: True if a double tap is detected
+    :return['activity']: True if the activity detection is triggered
+    :return['inactivity']: True if the inactivity detection is triggered
+    :return['free_fall']: True if a free fall is detected
+    :return['watermark']: True if the watermark level is reached
+    :return['overrun']: True if the fifo overrun is detected
     """
-    return self.read(self.regaddr_intsource, 1)[0] >> 1 & 1  # second bit
+    int_status = self.read(self.regaddr_intsource, 1)[0]
+    return {
+      'data_ready': int_status >> 7 & 1,
+      'single_tap': int_status >> 6 & 1,
+      'double_tap': int_status >> 5 & 1,
+      'activity': int_status >> 4 & 1,
+      'inactivity': int_status >> 3 & 1,
+      'free_fall': int_status >> 2 & 1,
+      'watermark': int_status >> 1 & 1,
+      'overrun': int_status & 1
+    }
 
-  @micropython.native
-  def is_data_ready(self) -> bool:
-    """
-    :return: 1 if a new measure has arrived since last reading, 0 otherwise
-    """
-    return self.read(self.regaddr_intsource, 1)[0] >> 7 & 1  # eighth bit
-
-  @micropython.native
+  #@micropython.native
   def get_nvalues_in_fifo(self) -> int:
     """
     :return: number of measures (xyz counts 1) in the fifo since last reading
     """
     return self.read(self.regaddr_fifostatus, 1)[0] & 0x3f  # first six bits to int
 
-  # == continuos readings able to reach 3.2 kHz ==
-  @micropython.native
-  def read_many_xyz(self, n:int) -> tuple:
+  # == Continuos readings able to reach 3.2 kHz ==
+  #@micropython.native
+  def read_many_xyz(self, n: int=1) -> tuple:
     """
     :param n: number of xyz accelerations to read from the accelerometer
     return: (
@@ -248,8 +313,9 @@ class Accelerometer:
         array of times at which each sample was recorded in microseconds
     )
     """
-    print("Measuring %s samples at %s Hz, range %sg" % (n, self.sampling_rate, self.g_range))
-    # local variables and functions are MUCH faster
+    if self.debug:
+      print(f"Measuring {n} samples at {self.sampling_rate} Hz, range {self.g_range}g")
+    # local variables and functions are MUCH faster, so copy them inside the function
     regaddr_acc = self.regaddr_acc | self.read_mask | self.multibyte_mask
     regaddr_intsource = self.regaddr_intsource | self.read_mask
     spi_readinto = self.spi.readinto
@@ -283,20 +349,19 @@ class Accelerometer:
       T[n_act_meas] = ticks_us()
       n_act_meas += 1
     self.set_power_mode('standby')
-    # final corrections
+    # tail data cleaning
     buf = self.remove_first_bytes_from_bytearray_of_many_transactions(buf)
     buf = buf[:n_exp_meas * bytes_per_3axes]  # remove exceeding values
     T = T[:n_exp_meas]  # remove exceeding values
-    # debug
-    actual_acq_time = (T[-1] - T[0]) / 1000000
-    print('measured for %s seconds, expected %s seconds' % (actual_acq_time, n_exp_meas/self.sampling_rate))
-    print('avg sampling rate = ' + str(n_act_meas / actual_acq_time) + ' Hz')
-    # TODO: send error to webapp when actual acquisition time is different from expected
+    if self.debug:
+      actual_acq_time = (T[-1] - T[0]) / 1000000
+      print(f"measured for {actual_acq_time} seconds, expected {n_exp_meas/self.sampling_rate} seconds")
+      print(f"average sampling rate = {n_act_meas / actual_acq_time} Hz" if actual_acq_time != 0 else "cannot compute avg sampling rate since acquisition time is 0; aboarting")
     gc.collect()
     return buf, T
 
-  @micropython.native
-  def read_many_xyz_fromfifo(self, n: int) -> tuple:
+  #@micropython.native
+  def read_many_xyz_fromfifo(self, n: int = 1) -> tuple:
     """
     read many measures of accaleration on the 3 axes from the fifo register
     :param n: number of measures to read (xyz counts 1)
@@ -305,8 +370,9 @@ class Accelerometer:
         array of times at which each sample was recorded in microseconds
     )
     """
-    print("Measuring %s samples at %s Hz, range %sg" % (n, self.sampling_rate, self.g_range))
-    # local variables and functions are MUCH faster
+    if self.debug:
+      print(f"Measuring {n} samples at {self.sampling_rate} Hz, range {self.g_range}g")
+    # local variables and functions are MUCH faster so copy them inside the function
     regaddr_acc = self.regaddr_acc | self.read_mask | self.multibyte_mask
     spi_readinto = self.spi.readinto
     cs = self.cs
@@ -334,20 +400,19 @@ class Accelerometer:
         n_act_meas += 1
     t_stop = time.ticks_us()
     self.set_power_mode('standby')
-    # final corrections
+    # tail data cleaning
     buf = self.remove_first_bytes_from_bytearray_of_many_transactions(buf)
     buf = buf[:n_exp_meas * bytes_per_3axes]  # remove exceeding values
     actual_acq_time = (t_stop - t_start) / 1000000
     actual_sampling_rate = n_act_meas / actual_acq_time
     T = [(i+1) / actual_sampling_rate for i in range(n_exp_meas)]
-    # debug
-    print('measured for %s seconds, expected %s seconds' % (actual_acq_time, n/self.sampling_rate))
-    print('actual sampling rate = ' + str(n_act_meas / actual_acq_time) + ' Hz')
-    # TODO: send error to webapp when actual acquisition time is different from expected
+    if self.debug:
+      print(f"measured for {actual_acq_time} seconds, expected {n_exp_meas/self.sampling_rate} seconds")
+      print(f"actual sampling rate = {actual_sampling_rate} Hz" if actual_acq_time != 0 else "cannot compute actual sampling rate since acquisition time is 0; aboarting")
     gc.collect()
     return buf, T
 
-  @micropython.native
+  #@micropython.native
   def read_continuos_xyz(self, acquisition_time:int) -> tuple:
     """
     read for the provided amount of time from the acceleration register, saving the value only if a new measure is
@@ -362,7 +427,7 @@ class Accelerometer:
     buf, T = self.read_many_xyz(n_exp_meas)
     return buf, T
 
-  @micropython.native
+  #@micropython.native
   def read_continuos_xyz_fromfifo(self, acquisition_time: int) -> tuple:
     """
     read for the provided amount of time all the values contained in the fifo register (if any)
@@ -377,7 +442,7 @@ class Accelerometer:
     return buf, T
 
   # == conversions ==
-  def xyzbytes2g(self, buf:bytearray) -> tuple:
+  def xyzbytes2g(self, buf: bytearray) -> tuple:
     """
     convert a bytearray of measures on the three axes xyz in three lists where the acceleration is in units of
         gravity on the sealevel (g)
@@ -385,8 +450,7 @@ class Accelerometer:
     :return: 3 lists of ints corresponding to x, y, z values of acceleration in units of g
     """
     gc.collect()
-    n_act_meas = int(len(buf)/self.bytes_per_3axes)
-    acc_x, acc_y, acc_z = zip(*[ustruct.unpack('<HHH', buf[i:i + self.bytes_per_3axes]) for i in range(n_act_meas) if i % self.bytes_per_3axes == 0])
+    acc_x, acc_y, acc_z = zip(*[ustruct.unpack('<HHH', buf[i:i + self.bytes_per_3axes]) for i in range(0,len(buf),self.bytes_per_3axes)])
     # negative values rule
     acc_x = [x if x <= 32767 else x - 65536 for x in acc_x]
     acc_y = [y if y <= 32767 else y - 65536 for y in acc_y]

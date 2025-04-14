@@ -22,8 +22,9 @@ Consider that at high sampling rates the MCU collects 3_axes x sampling_rate flo
 ### read one x, y, z
 ``` python
 from ADXL345_spi import ADXL345 as Accelerometer
-accelerometer = Accelerometer(cs_pin=5, scl_pin=18, sda_pin=23, sdo_pin=19, spi_freq=5000000)
+accelerometer = Accelerometer(spi_bus=2, cs_pin=5, scl_pin=18, sda_pin=23, sdo_pin=19, spi_freq=5_000_000)
 accelerometer.init_spi()
+assert accelerometer.is_spi_communcation_working(), "SPI communication not working"
 accelerometer.set_sampling_rate(1.56)   # Hz
 accelerometer.set_g_range(2)            # max measurable acceleration pm 2g
 accelerometer.set_fifo_mode('bypass')
@@ -37,8 +38,9 @@ accelerometer.deinit_spi()  # this is necessary, otherwise if another SPI is ini
 ### read many x, y, z
 ``` python
 from ADXL345_spi import ADXL345 as Accelerometer
-accelerometer = Accelerometer()                     # assumes accelerometer is connected to MCU spi default Pins
+accelerometer = Accelerometer(spi_bus=2, cs_pin=5, scl_pin=18, sda_pin=23, sdo_pin=19, spi_freq=5_000_000)
 accelerometer.init_spi()
+assert accelerometer.is_spi_communcation_working(), "SPI communication not working"
 accelerometer.set_sampling_rate(3200)
 accelerometer.set_g_range(2)
 accelerometer.set_fifo_mode('bypass')
@@ -52,8 +54,9 @@ accelerometer.deinit_spi()
 ### read continuosly when data is ready
 ``` python
 from ADXL345_spi import ADXL345 as Accelerometer
-accelerometer = Accelerometer()
+accelerometer = Accelerometer(spi_bus=2, cs_pin=5, scl_pin=18, sda_pin=23, sdo_pin=19, spi_freq=5_000_000)
 accelerometer.init_spi()
+assert accelerometer.is_spi_communcation_working(), "SPI communication not working"
 accelerometer.set_sampling_rate(3200)
 accelerometer.set_g_range(2)
 accelerometer.set_fifo_mode('bypass')
@@ -68,8 +71,9 @@ accelerometer.deinit_spi()
 The method for reading from fifo is implemented even though it doesn't read more than one row of the fifo in one transaction, making its performances equal to the method reading measures when they are ready. Trying to read more than one row of the fifo in one transaction always resulted in reading following registers instead of other rows of the fifo.
 ``` python
 from ADXL345_spi import ADXL345 as Accelerometer
-accelerometer = Accelerometer()
+accelerometer = Accelerometer(spi_bus=2, cs_pin=5, scl_pin=18, sda_pin=23, sdo_pin=19, spi_freq=5_000_000)
 accelerometer.init_spi()
+assert accelerometer.is_spi_communcation_working(), "SPI communication not working"
 accelerometer.set_sampling_rate(3200)
 accelerometer.set_g_range(2)
 accelerometer.set_fifo_mode('stream')
